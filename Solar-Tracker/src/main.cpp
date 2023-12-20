@@ -1,6 +1,3 @@
-// Uncomment for detailed BME680 debug info
-// #define BME680_DEBUG
-
 #include "Particle.h"
 #include "edge.h"
 #include "constants.h"
@@ -25,8 +22,6 @@ SerialLogHandler logHandler(115200, LOG_LEVEL_TRACE, {
 });
 
 void myLocationGenerationCallback(JSONWriter &writer, LocationPoint &point, const void *context);
-
-bool failure;
 
 void setup()
 {

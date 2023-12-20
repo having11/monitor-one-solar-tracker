@@ -2,7 +2,4 @@
 
 #include "Particle.h"
 
-namespace WeatherStationConstants
-{
-    constexpr std::chrono::milliseconds sleepTime = 5min;
-}
+constexpr uint8_t MotorControllerAddress = 0x10;
