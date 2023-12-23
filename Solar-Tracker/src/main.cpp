@@ -16,15 +16,16 @@ STARTUP(
     Edge::startup();
 );
 
-SerialLogHandler logHandler(115200, LOG_LEVEL_TRACE, {
+SerialLogHandler logHandler(115200, LOG_LEVEL_INFO, {
     { "app.gps.nmea", LOG_LEVEL_INFO },
-    { "app.gps.ubx",  LOG_LEVEL_INFO },
+    // { "app.gps.ubx",  LOG_LEVEL_INFO },
     { "ncp.at", LOG_LEVEL_INFO },
     { "net.ppp.client", LOG_LEVEL_INFO },
 });
 
 void myLocationGenerationCallback(JSONWriter &writer, LocationPoint &point, const void *context);
 void handleWakeCallback(EdgeSleepContext context);
+void printCurrentSun(void);
 void sendCommand(ControllerCommand_t*);
 void requestData(ControllerReceivedData_t*, int);
 void endTransmission(void);
@@ -57,7 +58,7 @@ void setup()
     TrackerLocation::instance().regLocGenCallback(myLocationGenerationCallback);
     TrackerSleep::instance().registerWake(handleWakeCallback);
 
-    Log.info("SENSORS INITIALIZED");
+    Log.info("INITIALIZED");
 
     homeMotors();
 
@@ -76,17 +77,25 @@ void loop()
 }
 
 void handleWakeCallback(EdgeSleepContext context) {
-    Serial.printf("Moving to new angles\n");
+    if (context.reason != EdgeSleepReason::WAKE) return;
+
+    Log.info("Moving to new angles");
     double newTilt, newRoll;
 
     sunAngles(&newTilt, &newRoll);
 
-    moveToAngles(newTilt, newRoll);
+    // moveToAngles(newTilt, newRoll);
 
     delay(3000);
 
     getCurrentAngles(&currentTilt, &currentRoll);
-    Serial.printf("Now at tilt=%f, roll=%f\n", currentTilt, currentRoll);
+    Log.info("Now at tilt=%f, roll=%f", currentTilt, currentRoll);
+}
+
+void printCurrentSun() {
+    Log.info("Getting new angles");
+    double newTilt, newRoll;
+    sunAngles(&newTilt, &newRoll);
 }
 
 void myLocationGenerationCallback(JSONWriter &writer, LocationPoint &point, const void *context)
@@ -95,6 +104,8 @@ void myLocationGenerationCallback(JSONWriter &writer, LocationPoint &point, cons
     writer.name("current_tilt").value(currentTilt);
     writer.name("current_roll").value(currentRoll);
     writer.endObject();
+
+    printCurrentSun();
 }
 
 void sendCommand(ControllerCommand_t *command) {
@@ -165,12 +176,14 @@ void moveToAngles(double tilt, double roll) {
 
 void sunAngles(double *zenithDeg, double *azimuthDeg) {
     // timezone offset from UTC
-    constexpr double tzOffset = -5;
+    int tzOffset = -6;
 
     LocationPoint loc;
-    Edge::instance().locationService.getLocation(loc);
-    std::tm currentTime = *gmtime(&loc.epochTime);
-    int jan1Days = daysSinceJan1(currentTime);
+    EdgeGnssAbstraction::instance().getLocation(loc);
+    std::tm *currentTime = gmtime(&loc.epochTime);
+    Log.info("Epoch current time=%lld", loc.epochTime);
+    int jan1Days = daysSinceJan1(*currentTime);
+    Log.info("Days since Jan 1: %d", jan1Days);
 
     double t1 = (360.0 / 365.24) * (jan1Days - 2);
     double t2 = (360 / M_PI) * 0.0167 * sin(t1);
@@ -179,13 +192,14 @@ void sunAngles(double *zenithDeg, double *azimuthDeg) {
     double declination = asin(t4);
 
     // https://solarsena.wpengine.com/solar-hour-angle-calculator-formula/
-    double currentLocalTimeMins = 60 * (currentTime.tm_hour - tzOffset) + currentTime.tm_min;
+    Log.info("Local time hour=%d, min=%d", currentTime->tm_hour - 6, currentTime->tm_min);
+    int currentLocalTimeMins = (60 * (currentTime->tm_hour - 6)) + currentTime->tm_min;
     // TODO: Handle when this value is negative
-    Serial.printf("Local time mins=%f\n", currentLocalTimeMins);
-    double solarHourAngle = (currentLocalTimeMins / 4) - 180;
-    Serial.printf("Solar hour angle=%f\n", solarHourAngle);
+    Log.info("Local time mins=%d, with offset=%d", currentLocalTimeMins, currentTime->tm_hour - 6);
+    double solarHourAngle = (currentLocalTimeMins / 4.0) - 180;
+    Log.info("Solar hour angle=%f", solarHourAngle);
 
-    t1 = (327 - 1) + ((15.5 - 12) / 24);
+    t1 = (jan1Days - 1) + (((currentLocalTimeMins / 60.0) - 12) / 24);
     t2 = (2 * M_PI) / 365;
     double fractionalYearRadians = t1 * t2;
 
@@ -196,44 +210,39 @@ void sunAngles(double *zenithDeg, double *azimuthDeg) {
     double t5 = 0.000075 + t4;
     double timeEquation = 229.18 * t5;
 
-    Serial.printf("Time equation=%f\n", timeEquation);
+    Log.info("Time equation=%f", timeEquation);
 
     // longitude; west = negative
-    double latitude = loc.latitude;
-    Serial.printf("Latitude=%f\n", latitude);
-    double offset = timeEquation + (4 * (latitude - (15 * tzOffset)));
+    double longitude = loc.longitude;
+    Log.info("Longitude=%f", longitude);
+    double offset = timeEquation + (4 * (longitude - (15 * 6)));
 
-    double correctedLocalTimeHours = (currentLocalTimeMins / 60) + (offset / 60);
-    Serial.printf("Corrected local time hours=%f\n", correctedLocalTimeHours);
+    double correctedLocalTimeHours = (currentLocalTimeMins / 60.0) + (offset / 60);
+    Log.info("Corrected local time hours=%f", correctedLocalTimeHours);
     double correctedSolarAngle = 15 * (correctedLocalTimeHours - 12);
-    Serial.printf("Corrected solar angle=%f\n", correctedSolarAngle);
+    Log.info("Corrected solar angle=%f", correctedSolarAngle);
 
     // https://solarsena.com/solar-elevation-angle-altitude/
+    double latitude = loc.latitude;
     t1 = cos(latitude) * cos(declination) * cos(correctedSolarAngle);
     t2 = sin(latitude) * sin(declination);
     double solarElevationAngleRadians = asin(t1 + t2);
-    Serial.printf("Solar elevation angle degrees=%f\n", radToDeg(solarElevationAngleRadians));
+    Log.info("Solar elevation angle degrees=%f", radToDeg(solarElevationAngleRadians));
 
     // Also the tilt angle
     double solarZenithAngle = degToRad(90) - solarElevationAngleRadians;
-    Serial.printf("Solar zenith angle degrees=%f\n", radToDeg(solarZenithAngle));
+    Log.info("Solar zenith angle degrees=%f", radToDeg(solarZenithAngle));
     *zenithDeg = radToDeg(solarZenithAngle);
 
+    // https://en.wikipedia.org/wiki/Solar_azimuth_angle#Conventional_Trigonometric_Formulas
     double azimuth;
-    if (solarElevationAngleRadians > 0) {
-        t1 = cos(latitude) * sin(solarZenithAngle);
-        t2 = sin(declination);
-        t3 = sin(latitude) * cos(solarZenithAngle);
-        t4 = acos((t3 - t2) / t1);
-        azimuth = ((int)radToDeg(t4) + 180) % 360;
-    } else {
-        t1 = cos(latitude) * sin(solarZenithAngle);
-        t2 = sin(latitude) * cos(solarZenithAngle);
-        t3 = (t2 - sin(declination)) / t1;
-        azimuth = (540 - (int)radToDeg(acos(t3))) % 360;
-    }
+    t1 = cos(degToRad(solarHourAngle)) * cos(declination) * sin(latitude);
+    t2 = sin(declination) * cos(latitude);
+    t3 = t2 - t1;
+    t4 = t3 / sin(solarZenithAngle);
+    azimuth = radToDeg(acos(t4));
 
-    Serial.printf("Azimuth degrees=%f\n", azimuth);
+    Log.info("Azimuth degrees=%f", azimuth);
     *azimuthDeg = azimuth;
 }
 
