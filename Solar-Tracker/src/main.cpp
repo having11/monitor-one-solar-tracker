@@ -60,8 +60,6 @@ void setup()
 
     Log.info("INITIALIZED");
 
-    homeMotors();
-
     double angleConstraints[4];
     getMinMaxAngles(angleConstraints);
     minTilt = angleConstraints[0];
@@ -69,6 +67,8 @@ void setup()
     minRoll = angleConstraints[2];
     maxRoll = angleConstraints[3];
     getCurrentAngles(&currentTilt, &currentRoll);
+
+    homeMotors();
 }
 
 void loop()
@@ -79,17 +79,18 @@ void loop()
 void handleWakeCallback(EdgeSleepContext context) {
     if (context.reason != EdgeSleepReason::WAKE) return;
 
-    Log.info("Moving to new angles");
-    double newTilt, newRoll;
+    // Could move here too
+    // Log.info("Moving to new angles");
+    // double newTilt, newRoll;
 
-    sunAngles(&newTilt, &newRoll);
+    // sunAngles(&newTilt, &newRoll);
 
     // moveToAngles(newTilt, newRoll);
 
-    delay(3000);
+    // delay(3000);
 
-    getCurrentAngles(&currentTilt, &currentRoll);
-    Log.info("Now at tilt=%f, roll=%f", currentTilt, currentRoll);
+    // getCurrentAngles(&currentTilt, &currentRoll);
+    // Log.info("Now at tilt=%f, roll=%f", currentTilt, currentRoll);
 }
 
 void printCurrentSun() {
@@ -100,12 +101,18 @@ void printCurrentSun() {
 
 void myLocationGenerationCallback(JSONWriter &writer, LocationPoint &point, const void *context)
 {
+    double newTilt, newRoll;
+    sunAngles(&newTilt, &newRoll);
+    moveToAngles(newTilt, newRoll);
+    delay(3000);
+
+    getCurrentAngles(&currentTilt, &currentRoll);
+    Log.info("Now at tilt=%f, roll=%f", currentTilt, currentRoll);
+
     writer.name("solar").beginObject();
     writer.name("current_tilt").value(currentTilt);
     writer.name("current_roll").value(currentRoll);
     writer.endObject();
-
-    printCurrentSun();
 }
 
 void sendCommand(ControllerCommand_t *command) {
@@ -240,7 +247,7 @@ void sunAngles(double *zenithDeg, double *azimuthDeg) {
     t2 = sin(declination) * cos(latitude);
     t3 = t2 - t1;
     t4 = t3 / sin(solarZenithAngle);
-    azimuth = radToDeg(acos(t4));
+    azimuth = 180 - radToDeg(acos(t4));
 
     Log.info("Azimuth degrees=%f", azimuth);
     *azimuthDeg = azimuth;
