@@ -2,7 +2,6 @@
 #include "edge.h"
 #include "constants.h"
 #include <time.h>
-#include <chrono>
 
 SYSTEM_THREAD(ENABLED);
 SYSTEM_MODE(SEMI_AUTOMATIC);
